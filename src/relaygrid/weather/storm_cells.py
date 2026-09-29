@@ -32,17 +32,29 @@ def severity(cell:StormCell):
 
 
 def affected_assets(cell:StormCell,assets:list[tuple[str,float,float]],timestamp_s:float):
-    return [(aid,point_distance_km(cell.center_lat,cell.center_lon,lat,lon)) for aid,lat,lon in assets if contains(cell,lat,lon,timestamp_s)]
+    seen:set[str]=set(); hits=[]
+    for aid,lat,lon in assets:
+        if aid in seen: continue
+        d=point_distance_km(cell.center_lat,cell.center_lon,lat,lon)
+        if contains(cell,lat,lon,timestamp_s):
+            seen.add(aid); hits.append((aid,d))
+    return hits
+
+
+def _overlaps(cell:StormCell,other:StormCell,overlap_ratio:float):
+    d=point_distance_km(cell.center_lat,cell.center_lon,other.center_lat,other.center_lon)
+    return cell.start_s<=other.end_s and d<=overlap_ratio*(cell.radius_km+other.radius_km)
 
 
 def merge_cells(cells:list[StormCell],overlap_ratio:float=.5):
     groups: list[list[StormCell]]=[]
     for cell in sorted(cells,key=lambda c:c.start_s):
-        placed=False
-        for g in groups:
-            head=g[0]
-            d=point_distance_km(head.center_lat,head.center_lon,cell.center_lat,cell.center_lon)
-            if d<=overlap_ratio*(head.radius_km+cell.radius_km) and cell.start_s<=head.end_s:
-                g.append(cell); placed=True; break
-        if not placed: groups.append([cell])
+        idxs=[i for i,g in enumerate(groups) if any(_overlaps(cell,m,overlap_ratio) for m in g)]
+        if not idxs:
+            groups.append([cell]); continue
+        merged:list[StormCell]=[cell]
+        for i in reversed(idxs):
+            merged.extend(groups.pop(i))
+        merged.sort(key=lambda c:(c.start_s,c.cell_id))
+        groups.insert(idxs[0],merged)
     return groups
