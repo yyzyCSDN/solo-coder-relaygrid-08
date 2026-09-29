@@ -32,17 +32,32 @@ def severity(cell:StormCell):
 
 
 def affected_assets(cell:StormCell,assets:list[tuple[str,float,float]],timestamp_s:float):
-    return [(aid,point_distance_km(cell.center_lat,cell.center_lon,lat,lon)) for aid,lat,lon in assets if contains(cell,lat,lon,timestamp_s)]
+    hits={}
+    for aid,lat,lon in assets:
+        if aid in hits or not contains(cell,lat,lon,timestamp_s): continue
+        hits[aid]=point_distance_km(cell.center_lat,cell.center_lon,lat,lon)
+    return list(hits.items())
+
+
+def _overlap(a:StormCell,b:StormCell,overlap_ratio:float):
+    d=point_distance_km(a.center_lat,a.center_lon,b.center_lat,b.center_lon)
+    return d<=overlap_ratio*(a.radius_km+b.radius_km) and not (a.end_s<b.start_s or b.end_s<a.start_s)
 
 
 def merge_cells(cells:list[StormCell],overlap_ratio:float=.5):
-    groups: list[list[StormCell]]=[]
-    for cell in sorted(cells,key=lambda c:c.start_s):
-        placed=False
-        for g in groups:
-            head=g[0]
-            d=point_distance_km(head.center_lat,head.center_lon,cell.center_lat,cell.center_lon)
-            if d<=overlap_ratio*(head.radius_km+cell.radius_km) and cell.start_s<=head.end_s:
-                g.append(cell); placed=True; break
-        if not placed: groups.append([cell])
-    return groups
+    ordered=sorted(cells,key=lambda c:c.start_s)
+    parent=list(range(len(ordered)))
+    def find(i):
+        while parent[i]!=i:
+            parent[i]=parent[parent[i]]; i=parent[i]
+        return i
+    def union(i,j):
+        ri,rj=find(i),find(j)
+        if ri!=rj: parent[rj]=ri
+    for i in range(len(ordered)):
+        for j in range(i+1,len(ordered)):
+            if _overlap(ordered[i],ordered[j],overlap_ratio): union(i,j)
+    groups: dict[int,list[StormCell]]={}
+    for i,cell in enumerate(ordered):
+        groups.setdefault(find(i),[]).append(cell)
+    return list(groups.values())
